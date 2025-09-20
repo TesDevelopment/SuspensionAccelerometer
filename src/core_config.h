@@ -123,7 +123,7 @@
 
 /******************** BOOTLOADER PARAMETERS ********************/
 /***************************************************************/
-#define CORE_BOOT_FDCAN FDCAN2
+#define CORE_BOOT_FDCAN FDCAN1
 #define CORE_BOOT_FDCAN_ID 0x004
 #define CORE_BOOT_FDCAN_MASTER_ID 0x084
 #define CORE_BOOT_FDCAN_BROADCAST_ID 0x7ff

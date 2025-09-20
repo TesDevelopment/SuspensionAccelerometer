@@ -7,7 +7,10 @@
 #include "clock.h"
 #include "gpio.h"
 #include "error_handler.h"
+#include "boot.h"
 #include "core_config.h"
+#include "spi.h"
+#include "adc.h"
 
 #include "FreeRTOS.h"
 #include "queue.h"
@@ -28,11 +31,15 @@ int main(void) {
     HAL_Init();
 
     // Drivers
-    core_heartbeat_init(GPIOA, GPIO_PIN_8);
+    core_heartbeat_init(GPIOA, GPIO_PIN_5);
     core_GPIO_set_heartbeat(GPIO_PIN_RESET);
 
+    core_SPI_init(SPI1, GPIOA, GPIO_PIN_7);
+    core_SPI_start(SPI1);
+
     if (!core_clock_init()) error_handler();
-    if (!core_CAN_init(FDCAN1, 1000000)) error_handler();
+    if (!core_CAN_init(CORE_BOOT_FDCAN, 1000000)) error_handler();
+    core_boot_init();
 
     int err = xTaskCreate(heartbeat_task, "heartbeat", 1000, NULL, 4, NULL);
     if (err != pdPASS) {
