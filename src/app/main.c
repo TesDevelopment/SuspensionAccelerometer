@@ -9,6 +9,8 @@
 #include "error_handler.h"
 #include "boot.h"
 #include "core_config.h"
+#include "spi.h"
+#include "adc.h"
 
 #include "FreeRTOS.h"
 #include "queue.h"
@@ -31,6 +33,9 @@ int main(void) {
     // Drivers
     core_heartbeat_init(GPIOA, GPIO_PIN_5);
     core_GPIO_set_heartbeat(GPIO_PIN_RESET);
+
+    core_SPI_init(SPI1, GPIOA, GPIO_PIN_7);
+    core_SPI_start(SPI1);
 
     if (!core_clock_init()) error_handler();
     if (!core_CAN_init(CORE_BOOT_FDCAN, 1000000)) error_handler();
