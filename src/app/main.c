@@ -7,10 +7,10 @@
 #include "clock.h"
 #include "gpio.h"
 #include "error_handler.h"
-#include "boot.h"
 #include "core_config.h"
 #include "spi.h"
 #include "adc.h"
+#include "rtt.h"
 
 #include "FreeRTOS.h"
 #include "queue.h"
@@ -18,12 +18,44 @@
 
 #include <stm32g4xx_hal.h>
 
+#define G_CONVERSION_FACTOR 0.0004
 
 void heartbeat_task(void *pvParameters) {
     (void) pvParameters;
     while(true) {
         core_GPIO_toggle_heartbeat();
         vTaskDelay(100 * portTICK_PERIOD_MS);
+    }
+}
+
+void init_board() {
+
+}
+
+void read_accel(void *pvParameters) {
+    (void) pvParameters;
+
+    /*
+        [R, 1, 0x36]
+        11110110
+        246
+        0xF6
+    */
+    uint8_t read_request[3] = {
+        0xF6,
+        0x0,
+        0x0
+    };
+
+
+    while(true) {
+        core_SPI_read_write(SPI1, &read_request, sizeof(read_request), &read_request, sizeof(read_request));
+
+        uint16_t z = (read_request[1] << 8) | read_request[2];
+
+        uint8_t zG = z * G_CONVERSION_FACTOR;
+
+        rprintf("%f", zG);
     }
 }
 
@@ -34,7 +66,13 @@ int main(void) {
     core_heartbeat_init(GPIOA, GPIO_PIN_5);
     core_GPIO_set_heartbeat(GPIO_PIN_RESET);
 
-    core_SPI_init(SPI1, GPIOA, GPIO_PIN_7);
+    core_SPI_init(SPI1, GPIOA, GPIO_PIN_4);
+    core_RTT_init();
+
+    /*
+    
+    The accelerometer is stupid and inverts the protocol.
+    */
     core_SPI_start(SPI1);
 
     if (!core_clock_init()) error_handler();
