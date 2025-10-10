@@ -28,12 +28,53 @@ void heartbeat_task(void *pvParameters) {
     }
 }
 
-void init_board() {
-    
+uint8_t init_board() {
+    /*
+        Set the Measure Mode to Acceleration
+
+        [W, 0, 0x2D]
+        0 0 101101
+        0x18AED
+        0x2D
+
+        [
+            0, Link Bit
+            0, Auto-SLeep,
+            1, Measurement Mode
+            0, Sleep
+            00, Wakeup bits
+        ]
+    */
+
+        /*
+        Read the offset of the z-axis
+
+        [R, 0, 0x20]
+        1 0 100000
+        0xA0
+    */
+
+    uint8_t read_request[2] = {
+        0xF6,
+        0xA0,
+    };
+
+    uint8_t *request = read_request;
+
+    core_SPI_start(SPI1);
+    core_SPI_read_write(SPI1, request, sizeof(request), request, sizeof(request));
+    core_SPI_stop(SPI1);
+
+    return read_request[1];
+}
+
+uint8_t build_dbc_messae(uint8_t z){
+    return 0;
 }
 
 void read_accel_task(void *pvParameters) {
-    (void) pvParameters;
+    (uint8_t) pvParameters;
+    uint8_t zOffset = init_board();
 
     /*
         [R, 1, 0x36]
@@ -47,15 +88,17 @@ void read_accel_task(void *pvParameters) {
         0x0
     };
 
+    uint8_t *request = read_request;
+
 
     while(true) {
         core_SPI_start(SPI1);
-        core_SPI_read_write(SPI1, &read_request, sizeof(read_request), &read_request, sizeof(read_request));
+        core_SPI_read_write(SPI1, request, sizeof(request), request, sizeof(request));
         core_SPI_stop(SPI1);
 
         uint16_t z = (read_request[1] << 8) | read_request[2];
 
-        uint8_t zG = z * G_CONVERSION_FACTOR;
+        uint8_t zG = (z * G_CONVERSION_FACTOR) - zOffset;
 
         rprintf("%f", zG);
         
@@ -84,15 +127,14 @@ int main(void) {
 
     if (!core_clock_init()) error_handler();
     if (!core_CAN_init(CORE_BOOT_FDCAN, 1000000)) error_handler();
-    core_boot_init();
+    //core_boot_init();
 
     int err = xTaskCreate(heartbeat_task, "heartbeat", 1000, NULL, 4, NULL);
     if (err != pdPASS) {
         error_handler();
     }
 
-    init_board();
-
+    
     err = xTaskCreate(read_accel_task, "acceleration", 1000, NULL, 4, NULL);
     if(err != pdPASS) {
         error_handler();
