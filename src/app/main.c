@@ -23,7 +23,7 @@
 void heartbeat_task(void *pvParameters) {
     (void) pvParameters;
     while(true) {
-	    rprintf("Hearbeat!\n");
+	    //rprintf("Hearbeat!\n");
         core_GPIO_toggle_heartbeat();
         vTaskDelay(1000 * portTICK_PERIOD_MS);
     }
@@ -64,40 +64,29 @@ uint8_t init_board() {
 
     // Checking return
 
-    /*
-        Set the Measure Mode to Acceleration
 
-        [R, 0, 0x2D]
-        1 0 101101
-        0xAD
+    // uint8_t rr[2] = {
+    //     0xAD,
+    //     0x00,
+    // };
 
-        0xF2
-        1 1 100010
-        [R, M, 0x22]
-    */ 
+    // uint8_t *check_req = rr;
 
-    uint8_t rr[2] = {
-        0xAD,
-        0x00,
-    };
+    // uint8_t rbuf[2] = {
+    //     0x0,
+    //     0x0
+    // };
 
-    uint8_t *check_req = rr;
+    // uint8_t *check_res = rbuf;
 
-    uint8_t rbuf[2] = {
-        0x0,
-        0x0
-    };
+    // rprintf("Sent 0x%x\n", rr[0]);
 
-    uint8_t *check_res = rbuf;
-
-    rprintf("Sent 0x%x\n", rr[0]);
-
-    core_SPI_start(SPI1);
-    core_SPI_read_write(SPI1, check_req, sizeof(rr), check_res, sizeof(rbuf));
-    core_SPI_stop(SPI1);
+    // core_SPI_start(SPI1);
+    // core_SPI_read_write(SPI1, check_req, sizeof(rr), check_res, sizeof(rbuf));
+    // core_SPI_stop(SPI1);
 
 
-    rprintf("Returned 0x%x | 0x%x\n", rbuf[0], rbuf[1]);
+    // rprintf("Returned 0x%x | 0x%x\n", rbuf[0], rbuf[1]);
 
     return read_request[1];
 }
@@ -142,13 +131,22 @@ void read_accel_task(void *pvParameters) {
         core_SPI_stop(SPI1);
 
         uint16_t z = (data_buffer_pointer[1] << 8) | data_buffer_pointer[2];
-        //rprintf("Raw Accel (z): %d  \n", z);
+        rprintf("Raw Accel (z): %d  \n", z);
 
         uint8_t zG = (z * G_CONVERSION_FACTOR) - zOffset;
 
         //rprintf("%d <- ??????\n", zG);
         
         core_CAN_send_fd_message(FDCAN1, 0xFFBF61E, sizeof(zG), &zG);
+        vTaskDelay(100);
+
+        /*
+            Checked that data is fresh
+        */
+
+        // data_buffer[0] = 0x0;
+        // data_buffer[1] = 0x0;
+        // data_buffer[2] = 0x0;
     }
 }
 
@@ -164,17 +162,20 @@ int main(void) {
     core_heartbeat_init(GPIOA, GPIO_PIN_15);
     core_GPIO_set_heartbeat(GPIO_PIN_RESET);
 
+    if (!core_clock_init()) error_handler();
 
     core_GPIO_init(GPIOA, GPIO_PIN_4, GPIO_MODE_OUTPUT_PP, GPIO_NOPULL);
     core_GPIO_digital_write(GPIOA, GPIO_PIN_4, true);
     core_SPI_init(SPI1, GPIOA, GPIO_PIN_4);
+    // core_GPIO_init(GPIOA, GPIO_PIN_7|GPIO_PIN_5, GPIO_MODE_OUTPUT_PP, GPIO_NOPULL);
+    // core_GPIO_digital_write(GPIOA, GPIO_PIN_7|GPIO_PIN_5, 0);
+    // while (1);
     core_RTT_init(); 
 
     //Init pins
     core_GPIO_init(GPIOA, GPIO_PIN_0, GPIO_MODE_OUTPUT_PP, GPIO_NOPULL); // Left Light
     core_GPIO_init(GPIOA, GPIO_PIN_8, GPIO_MODE_OUTPUT_PP, GPIO_NOPULL); // Right Light
 
-    if (!core_clock_init()) error_handler();
     if (!core_CAN_init(CORE_BOOT_FDCAN, 1000000)) error_handler();
     //core_boot_init();
 
