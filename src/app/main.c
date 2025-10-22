@@ -2,6 +2,7 @@
 
 #include <stdbool.h>
 #include <stdio.h>
+#include <math.h>
 
 #include "can.h"
 #include "clock.h"
@@ -16,6 +17,7 @@
 #include "queue.h"
 #include "task.h"
 
+
 #include <stm32g4xx_hal.h>
 
 #define G_CONVERSION_FACTOR 0.0004
@@ -27,6 +29,25 @@ void heartbeat_task(void *pvParameters) {
         core_GPIO_toggle_heartbeat();
         vTaskDelay(1000 * portTICK_PERIOD_MS);
     }
+}
+
+uint8_t read_register(uint8_t address) {
+    uint8_t request[2] = {
+        address + 0b10000000,
+        0x0
+    };
+
+    uint8_t response[2] = {
+        0x0,
+        0x0
+    };
+
+    core_SPI_start(SPI1);
+    core_SPI_read_write(SPI1, request, sizeof(request), response, sizeof(response));
+    core_SPI_stop(SPI1);
+
+    uint8_t data = response[1];
+    return data;
 }
 
 uint8_t init_board() {
@@ -47,7 +68,7 @@ uint8_t init_board() {
         ] -> 0x08
     */ 
 
-    rprintf("init read\n");
+    rprintf("Entering measurement mode\n");
     uint8_t read_request[2] = {
         0x2D,
         0x08,
@@ -62,80 +83,57 @@ uint8_t init_board() {
     core_SPI_read_write(SPI1, read_request, sizeof(read_request), response_buffer, sizeof(response_buffer));
     core_SPI_stop(SPI1);
 
-    // Checking return
+    uint8_t offset = read_register(0x20);
 
-
-    // uint8_t rr[2] = {
-    //     0xAD,
-    //     0x00,
-    // };
-
-    // uint8_t *check_req = rr;
-
-    // uint8_t rbuf[2] = {
-    //     0x0,
-    //     0x0
-    // };
-
-    // uint8_t *check_res = rbuf;
-
-    // rprintf("Sent 0x%x\n", rr[0]);
-
-    // core_SPI_start(SPI1);
-    // core_SPI_read_write(SPI1, check_req, sizeof(rr), check_res, sizeof(rbuf));
-    // core_SPI_stop(SPI1);
-
-
-    // rprintf("Returned 0x%x | 0x%x\n", rbuf[0], rbuf[1]);
-
-    return read_request[1];
+    return offset;
 }
 
-uint8_t build_dbc_messae(uint8_t z){
+uint8_t build_dbc_message(uint8_t z){
     return 0;
 }
 
+// uint8_t poll_offsets(void *pvParameters) {
+//     (void) *pvParameters;
+
+
+//     rprintf("Begining polling cycle...\n");
+//     uint8_t polling_rate = 500;
+
+//     float xSum = 0, ySum = 0, zSum = 0;
+//     for (int i = 0; i < polling_rate; i++) {
+//         xSum += (uint16_t) (read_register(0x33) << 8) | read_register(0x32);
+//         ySum +=  (uint16_t) (read_register(0x35) << 8) | read_register(0x34);
+//         zSum += (uint16_t) (read_register(0x37) << 8) | read_register(0x36);
+
+//         rprintf("Finished polling cycle #%d\n", i);
+//     }
+
+//     float xAvg = xSum / polling_rate;
+//     float yAvg = ySum / polling_rate;
+//     float zAvg = zSum / polling_rate;
+
+//     rprintf("Finished polling: (X) = %.2f (Y) = %.2f (Z) = %.2f\n", xAvg, yAvg, zAvg);
+// }
+
 void read_accel_task(void *pvParameters) {
-    (uint8_t) pvParameters;
+    (void) pvParameters;
 
     rprintf("Pre init board\n"); // VERY IMPORTANT!!!!!!!!!! - breaks code if you remove this
     uint8_t zOffset = init_board();
-
-    /*
-        [R, 1, 0x36]
-        11110110
-        246
-        0xF6
-    */
-    uint8_t read_request[3] = {
-        0xF6,
-        0x0,
-        0x0
-    };
-
-    uint8_t *request = read_request;
-
-    uint8_t data_buffer[3] = {
-        0x0,
-        0x0,
-        0x0
-    };
-
-    uint8_t *data_buffer_pointer = data_buffer;
-
-    
+    float mag;
 
     while(true) {
-        core_SPI_start(SPI1);
-        core_SPI_read_write(SPI1, request, sizeof(read_request), data_buffer_pointer, sizeof(data_buffer));
-        core_SPI_stop(SPI1);
+        int x = ((int)(int8_t)read_register(0x33) << 8) | read_register(0x32);  
+        int y = ((int)(int8_t)read_register(0x35) << 8) | read_register(0x34);
+        int z = ((int)(int8_t)read_register(0x37) << 8) | read_register(0x36);
 
-        uint16_t z = (data_buffer_pointer[1] << 8) | data_buffer_pointer[2];
-        rprintf("Raw Accel (z): %d  \n", z);
+        rprintf("Raw Accel: %d %d %d\n", x, y, z);
+        mag = sqrtf(x*x + y*y + z*z);
+        rprintf("Magnitude: %d\n", (int)(mag));
 
-        uint8_t zG = (z * G_CONVERSION_FACTOR) - zOffset;
+        uint8_t zG = (z - zOffset) * G_CONVERSION_FACTOR;
 
-        //rprintf("%d <- ??????\n", zG);
+        rprintf("G-Forces (z): %d\n", zG);
         
         core_CAN_send_fd_message(FDCAN1, 0xFFBF61E, sizeof(zG), &zG);
         vTaskDelay(100);
@@ -188,6 +186,11 @@ int main(void) {
     if(err != pdPASS) {
         error_handler();
     }
+
+    // int err = xTaskCreate(poll_offsets, "polling_task", 1000, NULL, 4, NULL);
+    // if(err != pdPASS) {
+    //     error_handler();
+    // }
 
     NVIC_SetPriorityGrouping(NVIC_PRIORITYGROUP_4);
 
