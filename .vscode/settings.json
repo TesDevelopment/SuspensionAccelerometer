@@ -2,6 +2,7 @@
     "files.associations": {
         "core_config.h": "c",
         "stdio.h": "c",
-        "freertos.h": "c"
+        "freertos.h": "c",
+        "rtt.h": "c"
     }
 }
