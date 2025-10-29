@@ -20,7 +20,7 @@
 
 #include <stm32g4xx_hal.h>
 
-#define G_CONVERSION_FACTOR 0.0004
+#define G_CONVERSION_FACTOR 0.0039
 
 void heartbeat_task(void *pvParameters) {
     (void) pvParameters;
@@ -50,7 +50,7 @@ uint8_t read_register(uint8_t address) {
     return data;
 }
 
-uint8_t init_board() {
+void init_board() {
     /*
         Set the Measure Mode to Acceleration
 
@@ -82,69 +82,91 @@ uint8_t init_board() {
     core_SPI_start(SPI1);
     core_SPI_read_write(SPI1, read_request, sizeof(read_request), response_buffer, sizeof(response_buffer));
     core_SPI_stop(SPI1);
-
-    uint8_t offset = read_register(0x20);
-
-    return offset;
 }
 
 uint8_t build_dbc_message(uint8_t z){
     return 0;
 }
 
-// uint8_t poll_offsets(void *pvParameters) {
-//     (void) *pvParameters;
+/*
 
+    Unused for now,
+    Seems to overcomplicate the process when one poll is enough;
+    multiple polls doesn't seem to effect the overall result
 
-//     rprintf("Begining polling cycle...\n");
-//     uint8_t polling_rate = 500;
+*/
+float* poll_offsets() {
+    rprintf("Entering polling cycle...\n");
+    int polling_rate = 500;
 
-//     float xSum = 0, ySum = 0, zSum = 0;
-//     for (int i = 0; i < polling_rate; i++) {
-//         xSum += (uint16_t) (read_register(0x33) << 8) | read_register(0x32);
-//         ySum +=  (uint16_t) (read_register(0x35) << 8) | read_register(0x34);
-//         zSum += (uint16_t) (read_register(0x37) << 8) | read_register(0x36);
+    float xSum = 0, ySum = 0, zSum = 0;
+    for (int i = 0; i < polling_rate; i++) {
+        xSum += ((int)(int8_t)read_register(0x33) << 8) | read_register(0x32);
+        ySum +=  ((int)(int8_t)read_register(0x35) << 8) | read_register(0x34);
+        zSum += ((int)(int8_t)read_register(0x37) << 8) | read_register(0x36);
+    }
 
-//         rprintf("Finished polling cycle #%d\n", i);
-//     }
+    float xAvg = xSum / polling_rate;
+    float yAvg = ySum / polling_rate;
+    float zAvg = zSum / polling_rate;
 
-//     float xAvg = xSum / polling_rate;
-//     float yAvg = ySum / polling_rate;
-//     float zAvg = zSum / polling_rate;
+    // Converting to int is intentional, float displays dont work with rtt
+    rprintf("Finished polling: (X) = %d (Y) = %d (Z) = %d\n", (int) ((xAvg * G_CONVERSION_FACTOR) * 1000), (int) ((yAvg * G_CONVERSION_FACTOR) * 1000), (int) ((zAvg * G_CONVERSION_FACTOR) * 1000));
 
-//     rprintf("Finished polling: (X) = %.2f (Y) = %.2f (Z) = %.2f\n", xAvg, yAvg, zAvg);
-// }
+    float offsets[3] = {
+        xAvg,
+        yAvg,
+        zAvg
+    };
+
+    return offsets;
+}
 
 void read_accel_task(void *pvParameters) {
     (void) pvParameters;
 
-    rprintf("Pre init board\n"); // VERY IMPORTANT!!!!!!!!!! - breaks code if you remove this
-    uint8_t zOffset = init_board();
+    rprintf("Initializing Accelerometer...\n"); // VERY IMPORTANT!!!!!!!!!! - breaks code if you remove this
+    init_board();
+
+    rprintf("Polling offsets...\n");
+    //float* offsets = poll_offsets();
+
+    int xOffset = (((int)(int8_t)read_register(0x33) << 8) | read_register(0x32));  
+    int yOffset = (((int)(int8_t)read_register(0x35) << 8) | read_register(0x34));
+    int zOffset = (((int)(int8_t)read_register(0x37) << 8) | read_register(0x36));
+    
     float mag;
 
     while(true) {
-        int x = ((int)(int8_t)read_register(0x33) << 8) | read_register(0x32);  
-        int y = ((int)(int8_t)read_register(0x35) << 8) | read_register(0x34);
-        int z = ((int)(int8_t)read_register(0x37) << 8) | read_register(0x36);
+        int x = (((int)(int8_t)read_register(0x33) << 8) | read_register(0x32));  
+        int y = (((int)(int8_t)read_register(0x35) << 8) | read_register(0x34));
+        int z = (((int)(int8_t)read_register(0x37) << 8) | read_register(0x36));
 
         rprintf("Raw Accel: %d %d %d\n", x, y, z);
         mag = sqrtf(x*x + y*y + z*z);
         rprintf("Magnitude: %d\n", (int)(mag));
 
-        uint8_t zG = (z - zOffset) * G_CONVERSION_FACTOR;
+        float xG = (x - xOffset) * G_CONVERSION_FACTOR;
+        float yG = (y - yOffset) * G_CONVERSION_FACTOR;
+        float zG = (z - zOffset) * G_CONVERSION_FACTOR;
 
-        rprintf("G-Forces (z): %d\n", zG);
+        int xDisplay = (int) (xG * 1000);
+        int yDisplay = (int) (yG * 1000);
+        int zDisplay = (int) (zG * 1000);
         
-        core_CAN_send_fd_message(FDCAN1, 0xFFBF61E, sizeof(zG), &zG);
+
+        rprintf("G-Forces (simplified): [%d, %d, %d]\n", (int) xG, (int) yG, (int) zG);
+        rprintf("G-Forces * 1000: [%d, %d, %d]\n", xDisplay, yDisplay, zDisplay);
+        rprintf("G-Forces (debug): : [%d (%d), %d (%d), %d (%d)]\n",xDisplay, (int) (x * G_CONVERSION_FACTOR * 1000), yDisplay, (int) (y * G_CONVERSION_FACTOR * 1000), zDisplay, (int) (z * G_CONVERSION_FACTOR * 1000));
+        rprintf("----------------------------\n");
+
+        uint16_t g_forces[3];
+        g_forces[0] = xDisplay;
+        g_forces[1] = yDisplay;
+        g_forces[2] = zDisplay;
+        
+        core_CAN_send_message(FDCAN1, 4, sizeof(zG), *((uint64_t*)g_forces));
         vTaskDelay(100);
-
-        /*
-            Checked that data is fresh
-        */
-
-        // data_buffer[0] = 0x0;
-        // data_buffer[1] = 0x0;
-        // data_buffer[2] = 0x0;
     }
 }
 
@@ -186,11 +208,6 @@ int main(void) {
     if(err != pdPASS) {
         error_handler();
     }
-
-    // int err = xTaskCreate(poll_offsets, "polling_task", 1000, NULL, 4, NULL);
-    // if(err != pdPASS) {
-    //     error_handler();
-    // }
 
     NVIC_SetPriorityGrouping(NVIC_PRIORITYGROUP_4);
 
