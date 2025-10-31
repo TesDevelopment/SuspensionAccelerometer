@@ -165,7 +165,7 @@ void read_accel_task(void *pvParameters) {
         g_forces[1] = yDisplay;
         g_forces[2] = zDisplay;
         
-        core_CAN_send_message(FDCAN1, 4, sizeof(zG), *((uint64_t*)g_forces));
+        core_CAN_send_message(FDCAN1, 4, 6, *((uint64_t*)g_forces));
         vTaskDelay(100);
     }
 }
@@ -196,7 +196,7 @@ int main(void) {
     core_GPIO_init(GPIOA, GPIO_PIN_0, GPIO_MODE_OUTPUT_PP, GPIO_NOPULL); // Left Light
     core_GPIO_init(GPIOA, GPIO_PIN_8, GPIO_MODE_OUTPUT_PP, GPIO_NOPULL); // Right Light
 
-    if (!core_CAN_init(CORE_BOOT_FDCAN, 1000000)) error_handler();
+    if (!core_CAN_init(FDCAN1, 1000000)) error_handler();
     //core_boot_init();
 
     int err = xTaskCreate(heartbeat_task, "heartbeat", 1000, NULL, 4, NULL);
