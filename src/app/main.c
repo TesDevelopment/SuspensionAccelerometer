@@ -20,7 +20,7 @@
 
 #include <stm32g4xx_hal.h>
 
-#define G_CONVERSION_FACTOR 0.0039
+#define G_CONVERSION_FACTOR 0.004
 #define ACCEL_SPI           SPI2
 #define NUM_SAMPLES         10
 
@@ -52,6 +52,25 @@ uint8_t read_register(uint8_t address) {
     return data;
 }
 
+void write_register(uint8_t address, uint8_t value) {
+    uint8_t read_request[2] = {
+        address,
+        value,
+    };
+
+    uint8_t response_buffer[2] = {
+        0x0,
+        0x0
+    };
+
+    core_SPI_start(ACCEL_SPI);
+    core_SPI_read_write(ACCEL_SPI, read_request, sizeof(read_request), response_buffer, sizeof(response_buffer));
+    core_SPI_stop(ACCEL_SPI);
+    
+    uint8_t resp = read_register(address);
+    if (resp != value) rprintf("ERROR: wrote %02x, received %02x\n", value, resp);
+}
+
 void init_board() {
     /*
         Set the Measure Mode to Acceleration
@@ -71,19 +90,7 @@ void init_board() {
     */ 
 
     rprintf("Entering measurement mode\n");
-    uint8_t read_request[2] = {
-        0x2D,
-        0x08,
-    };
-
-    uint8_t response_buffer[2] = {
-        0x0,
-        0x0
-    };
-
-    core_SPI_start(ACCEL_SPI);
-    core_SPI_read_write(ACCEL_SPI, read_request, sizeof(read_request), response_buffer, sizeof(response_buffer));
-    core_SPI_stop(ACCEL_SPI);
+    write_register(0x2D, 0x08);
 
 
     /*
@@ -96,15 +103,11 @@ void init_board() {
         1600 hz -> 0x0E
     */
 
-    rprintf("Setting refresh rate to 1600hz...");
-    uint8_t refresh_message = {
-        0x22D,
-        0x0E
-    };
+    rprintf("Setting refresh rate to 1600hz...\n");
+    write_register(0x2C, 0x0E);
 
-    core_SPI_start(ACCEL_SPI);
-    core_SPI_read_write(ACCEL_SPI, refresh_message, sizeof(refresh_message), response_buffer, sizeof(response_buffer));
-    core_SPI_stop(ACCEL_SPI);
+    rprintf("Setting range...\n");
+    write_register(0x31, 0x0B);
 }
 
 uint8_t build_dbc_message(uint8_t z){
@@ -153,6 +156,7 @@ int debugedCanMessage(FDCAN_GlobalTypeDef *can, uint32_t id, uint8_t dlc, uint64
         rprintf("Sending CAN message failed...");
     }
     while ((can->PSR & 0x18) == 0x18);
+    for (int i=0; i < 1000; i++);
 }
 
 void read_accel_task(void *pvParameters) {
@@ -163,10 +167,13 @@ void read_accel_task(void *pvParameters) {
 
     rprintf("Polling offsets...\n");
     //float* offsets = poll_offsets();
-
-    int xOffset = (((int)(int8_t)read_register(0x33) << 8) | read_register(0x32));  
-    int yOffset = (((int)(int8_t)read_register(0x35) << 8) | read_register(0x34));
-    int zOffset = (((int)(int8_t)read_register(0x37) << 8) | read_register(0x36));
+    
+    vTaskDelay(20);
+    //int xOffset = (((int)(int8_t)read_register(0x33) << 8) | read_register(0x32));  
+    //int yOffset = (((int)(int8_t)read_register(0x35) << 8) | read_register(0x34));
+    //int zOffset = (((int)(int8_t)read_register(0x37) << 8) | read_register(0x36));
+    int xOffset = 0, yOffset = 0, zOffset = 0;
+    rprintf("offsets %d, %d, %d\n", xOffset, yOffset, zOffset);
 
     float mins[3];
     float maxs[3];
@@ -230,20 +237,22 @@ void read_accel_task(void *pvParameters) {
         sampled_y /= NUM_SAMPLES;
         sampled_z /= NUM_SAMPLES;
 
-        uint16_t averages[3];
+        int16_t averages[3];
         averages[0] = (int)(sampled_x * 1000);
         averages[1] = (int)(sampled_y * 1000);
         averages[2] = (int)(sampled_z * 1000);
 
-        uint16_t min_out[3];
+        int16_t min_out[3];
         min_out[0] = (int) (mins[0] * 1000);
         min_out[1] = (int) (mins[1] * 1000);
         min_out[2] = (int) (mins[2] * 1000);
 
-        uint16_t max_out[3];
+        int16_t max_out[3];
         max_out[0] = (int) (maxs[0] * 1000);
         max_out[1] = (int) (maxs[1] * 1000);
         max_out[2] = (int) (maxs[2] * 1000);
+
+        rprintf("%d %d %d\n", averages[0], averages[1], averages[2]);
 
         debugedCanMessage(FDCAN1, 506, 6, *((uint64_t*)averages));
         debugedCanMessage(FDCAN1, 507, 6, *((uint64_t*)min_out));
@@ -266,6 +275,10 @@ int main(void) {
     core_GPIO_init(GPIOA, GPIO_PIN_4, GPIO_MODE_OUTPUT_PP, GPIO_NOPULL);
     core_GPIO_digital_write(GPIOA, GPIO_PIN_4, true);
     core_SPI_init(ACCEL_SPI, GPIOB, GPIO_PIN_12);
+    ACCEL_SPI->I2SCFGR = 0;
+    ACCEL_SPI->CR1 = (7 << SPI_CR1_BR_Pos) | SPI_CR1_MSTR | SPI_CR1_SSI | SPI_CR1_SSM | SPI_CR1_CPHA | SPI_CR1_CPOL;
+    ACCEL_SPI->CR2 = SPI_CR2_SSOE | (7 << SPI_CR2_DS_Pos) | SPI_CR2_FRXTH;
+    ACCEL_SPI->CR1 |= SPI_CR1_SPE;
     core_RTT_init(); 
 
     //Init pins
